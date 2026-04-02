@@ -24,6 +24,9 @@ def _make_model():
 
 
 
+_last_sources: list[str] = []
+
+
 @tool
 def search_docs(query: str) -> str:
     results = hybrid_search(query)
@@ -32,7 +35,10 @@ def search_docs(query: str) -> str:
 
     parts = []
     for r in results:
-        parts.append(f"[{r.get('title', 'Document')}] (source: {r.get('source', '')})\n{r.get('text', '')}")
+        source = r.get("source", "")
+        if source:
+            _last_sources.append(source)
+        parts.append(f"[{r.get('title', 'Document')}] (source: {source})\n{r.get('text', '')}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -54,3 +60,12 @@ def create_agent() -> Agent:
         tools=[search_docs],
         system_prompt=SYSTEM_PROMPT,
     )
+
+
+def run(agent: Agent, question: str) -> dict:
+    _last_sources.clear()
+    result = agent(question)
+    return {
+        "answer": str(result),
+        "sources": list(dict.fromkeys(_last_sources)),
+    }

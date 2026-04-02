@@ -32,60 +32,23 @@ def _get_rag_agent():
     return _rag_agent
 
 
-def _extract_sql_from_result(result) -> str | None:
-    try:
-        for msg in result.messages:
-            if msg.get("role") == "assistant":
-                for block in msg.get("content", []):
-                    if block.get("type") == "tool_use" and block.get("name") == "run_sql":
-                        sql = block.get("input", {}).get("sql", "").strip()
-                        if sql:
-                            return sql
-    except (AttributeError, TypeError):
-        pass
-    return None
-
-
-def _extract_kb_sources_from_result(result) -> list[str]:
-    sources = []
-    try:
-        for msg in result.messages:
-            if msg.get("role") == "user":
-                for block in msg.get("content", []):
-                    if block.get("type") == "tool_result":
-                        content = block.get("content", "")
-                        if isinstance(content, str):
-                            for part in content.split("---"):
-                                for line in part.splitlines():
-                                    if line.strip().startswith("(source:"):
-                                        src = line.strip().removeprefix("(source:").removesuffix(")").strip()
-                                        if src:
-                                            sources.append(src)
-    except (AttributeError, TypeError):
-        pass
-    return list(dict.fromkeys(sources))
+_request_sources: list[str] = []
 
 
 @tool
 def query_database(question: str) -> str:
-    agent = _get_sql_agent()
-    result = agent(question)
-    sql = _extract_sql_from_result(result)
-    answer = str(result)
-    if sql:
-        return f"{answer}\n\n[SQL_USED: {sql}]"
-    return answer
+    result = text2sql.run(_get_sql_agent(), question)
+    log.info(f"query_database sources: {result['sources']}")
+    _request_sources.extend(result["sources"])
+    return result["answer"]
 
 
 @tool
 def search_knowledge_base(question: str) -> str:
-    agent = _get_rag_agent()
-    result = agent(question)
-    sources = _extract_kb_sources_from_result(result)
-    answer = str(result)
-    if sources:
-        return f"{answer}\n\n[KB_SOURCES: {', '.join(sources)}]"
-    return answer
+    result = rag.run(_get_rag_agent(), question)
+    log.info(f"search_knowledge_base sources: {result['sources']}")
+    _request_sources.extend(result["sources"])
+    return result["answer"]
 
 
 SYSTEM_PROMPT = """You are an assistant orchestrating a multi-agent system.
@@ -138,9 +101,13 @@ _TOOL_STATUS = {
 }
 
 
+_last_result = None
+
+
 async def stream(query: str, chat_id: str):
     """Async generator that yields dicts: {"token": str} or {"status": str}."""
-    global _orchestrator
+    global _orchestrator, _last_result
+    _request_sources.clear()
     if _orchestrator is None:
         _orchestrator = create_orchestrator()
 
@@ -151,10 +118,31 @@ async def stream(query: str, chat_id: str):
             yield {"status": status}
         elif "data" in event:
             yield {"token": event["data"]}
+        elif "result" in event:
+            _last_result = event["result"]
+
+
+def extract_last_sources(_chat_id: str) -> list[str]:
+    return list(dict.fromkeys(_request_sources))
+
+
+def extract_last_usage() -> dict:
+    global _last_result
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    if _last_result is None:
+        return usage
+    try:
+        acc = _last_result.metrics.accumulated_usage
+        usage["prompt_tokens"] = acc.get("inputTokens", 0)
+        usage["completion_tokens"] = acc.get("outputTokens", 0)
+    except (AttributeError, KeyError):
+        pass
+    return usage
 
 
 def run(query: str, chat_id: str) -> dict:
     global _orchestrator
+    _request_sources.clear()
     if _orchestrator is None:
         _orchestrator = create_orchestrator()
 
@@ -173,34 +161,8 @@ def run(query: str, chat_id: str) -> dict:
     except (AttributeError, KeyError):
         pass
 
-    sources = _extract_sources(result)
-
     return {
         "response": response_text,
-        "sources": sources,
+        "sources": list(dict.fromkeys(_request_sources)),
         "token_usage": token_usage,
     }
-
-
-def _extract_sources(result) -> list[str]:
-    sources = []
-    try:
-        for msg in result.messages:
-            if msg.get("role") == "user":
-                for block in msg.get("content", []):
-                    if block.get("type") != "tool_result":
-                        continue
-                    content = block.get("content", "")
-                    if not isinstance(content, str):
-                        continue
-                    if "[SQL_USED:" in content:
-                        sql = content.split("[SQL_USED:")[1].split("]")[0].strip()
-                        sources.append(f"SQL: {sql}")
-                    if "[KB_SOURCES:" in content:
-                        kb = content.split("[KB_SOURCES:")[1].split("]")[0].strip()
-                        for s in kb.split(", "):
-                            if s:
-                                sources.append(f"KB: {s}")
-    except (AttributeError, TypeError):
-        pass
-    return list(dict.fromkeys(sources))  

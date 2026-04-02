@@ -8,6 +8,7 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data:ro
+      - fastembed_cache:/tmp/fastembed_cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,3 +50,4 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  fastembed_cache:

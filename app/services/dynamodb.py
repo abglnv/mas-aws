@@ -68,13 +68,8 @@ def save_log(
         "full_name": {"S": full_name},
         "query": {"S": query},
         "answer": {"S": answer},
-        "usage": {
-            "M": {
-                "input_tokens": {"N": str(usage.get("prompt_tokens", 0))},
-                "output_tokens": {"N": str(usage.get("completion_tokens", 0))},
-                "total_cost_usd": {"N": "0.0"},
-            }
-        },
+        "input_tokens": {"N": str(usage.get("prompt_tokens", 0))},
+        "output_tokens": {"N": str(usage.get("completion_tokens", 0))},
         "sources_links": {"L": [{"S": s} for s in sources]},
         "time_taken": {"N": str(round(time_taken, 2))},
         "ttl": {"N": str(ttl)},

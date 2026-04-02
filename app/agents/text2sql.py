@@ -38,16 +38,21 @@ def _format_rows(rows: list[dict]) -> str:
     return "\n".join([header, sep] + data)
 
 
+_last_sql: list[str] = []
+
+
 @tool
 def run_sql(sql: str) -> str:
     """Execute a SQL SELECT query and return formatted results."""
     if not sql.strip().upper().startswith("SELECT"):
         return "Error: Only SELECT queries are allowed."
+    log.info(f"run_sql called: {sql.strip()!r}")
+    _last_sql.append(sql.strip())
     try:
         rows = execute_query(sql)
         if not rows:
             return "Query returned no results."
-        rows = rows[:20] 
+        rows = rows[:20]
         return f"{len(rows)} row(s):\n{_format_rows(rows)}"
     except Exception as e:
         return f"SQL Error: {e}"
@@ -72,3 +77,12 @@ def create_agent() -> Agent:
         tools=[run_sql],
         system_prompt=SYSTEM_PROMPT,
     )
+
+
+def run(agent: Agent, question: str) -> dict:
+    _last_sql.clear()
+    result = agent(question)
+    return {
+        "answer": str(result),
+        "sources": list(_last_sql),
+    }

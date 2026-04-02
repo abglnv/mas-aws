@@ -32,16 +32,60 @@ def _get_rag_agent():
     return _rag_agent
 
 
+def _extract_sql_from_result(result) -> str | None:
+    try:
+        for msg in result.messages:
+            if msg.get("role") == "assistant":
+                for block in msg.get("content", []):
+                    if block.get("type") == "tool_use" and block.get("name") == "run_sql":
+                        sql = block.get("input", {}).get("sql", "").strip()
+                        if sql:
+                            return sql
+    except (AttributeError, TypeError):
+        pass
+    return None
+
+
+def _extract_kb_sources_from_result(result) -> list[str]:
+    sources = []
+    try:
+        for msg in result.messages:
+            if msg.get("role") == "user":
+                for block in msg.get("content", []):
+                    if block.get("type") == "tool_result":
+                        content = block.get("content", "")
+                        if isinstance(content, str):
+                            for part in content.split("---"):
+                                for line in part.splitlines():
+                                    if line.strip().startswith("(source:"):
+                                        src = line.strip().removeprefix("(source:").removesuffix(")").strip()
+                                        if src:
+                                            sources.append(src)
+    except (AttributeError, TypeError):
+        pass
+    return list(dict.fromkeys(sources))
+
+
 @tool
 def query_database(question: str) -> str:
-    result = _get_sql_agent()(question)
-    return str(result)
+    agent = _get_sql_agent()
+    result = agent(question)
+    sql = _extract_sql_from_result(result)
+    answer = str(result)
+    if sql:
+        return f"{answer}\n\n[SQL_USED: {sql}]"
+    return answer
 
 
 @tool
 def search_knowledge_base(question: str) -> str:
-    result = _get_rag_agent()(question)
-    return str(result)
+    agent = _get_rag_agent()
+    result = agent(question)
+    sources = _extract_kb_sources_from_result(result)
+    answer = str(result)
+    if sources:
+        return f"{answer}\n\n[KB_SOURCES: {', '.join(sources)}]"
+    return answer
 
 
 SYSTEM_PROMPT = """You are an assistant orchestrating a multi-agent system.
@@ -142,14 +186,21 @@ def _extract_sources(result) -> list[str]:
     sources = []
     try:
         for msg in result.messages:
-            if msg.get("role") == "assistant":
+            if msg.get("role") == "user":
                 for block in msg.get("content", []):
-                    if block.get("type") == "tool_use":
-                        tool_name = block.get("name", "")
-                        if tool_name == "query_database":
-                            sources.append("SQL Database")
-                        elif tool_name == "search_knowledge_base":
-                            sources.append("Knowledge Base (Qdrant)")
+                    if block.get("type") != "tool_result":
+                        continue
+                    content = block.get("content", "")
+                    if not isinstance(content, str):
+                        continue
+                    if "[SQL_USED:" in content:
+                        sql = content.split("[SQL_USED:")[1].split("]")[0].strip()
+                        sources.append(f"SQL: {sql}")
+                    if "[KB_SOURCES:" in content:
+                        kb = content.split("[KB_SOURCES:")[1].split("]")[0].strip()
+                        for s in kb.split(", "):
+                            if s:
+                                sources.append(f"KB: {s}")
     except (AttributeError, TypeError):
         pass
     return list(dict.fromkeys(sources))  

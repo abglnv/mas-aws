@@ -32,6 +32,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("Thinking... ▌", parse_mode="HTML")
 
     full_text = ""
+    status = "Thinking..."
     last_edit = 0.0
 
     try:
@@ -48,12 +49,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     payload = line[6:]
                     if payload == "[DONE]":
                         break
-                    full_text += json.loads(payload).get("token", "")
+                    event = json.loads(payload)
 
-                    now = time.monotonic()
-                    if now - last_edit >= EDIT_INTERVAL and full_text:
-                        await msg.edit_text(full_text + "▌", parse_mode="HTML")
-                        last_edit = now
+                    if "status" in event:
+                        status = event["status"]
+                        now = time.monotonic()
+                        if now - last_edit >= EDIT_INTERVAL:
+                            await msg.edit_text(f"<i>{status}</i> ▌", parse_mode="HTML")
+                            last_edit = now
+                    elif "token" in event:
+                        full_text += event["token"]
+                        now = time.monotonic()
+                        if now - last_edit >= EDIT_INTERVAL and full_text:
+                            await msg.edit_text(full_text + "▌")
+                            last_edit = now
 
         if full_text:
             await msg.edit_text(full_text, parse_mode="HTML")

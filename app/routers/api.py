@@ -47,8 +47,8 @@ async def invoke(request: InvokeRequest):
 @router.post("/invoke/stream")
 async def invoke_stream(request: InvokeRequest):
     async def generate():
-        async for token in orchestrator.stream(request.query, request.chat_id):
-            yield f"data: {json.dumps({'token': token})}\n\n"
+        async for event in orchestrator.stream(request.query, request.chat_id):
+            yield f"data: {json.dumps(event)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

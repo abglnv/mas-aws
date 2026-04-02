@@ -52,8 +52,11 @@ You have two tools:
 
 Analyze the question, call the appropriate tool(s), then write a clear and concise answer.
 
-Formatting rules (the response is shown in Telegram):
-- Use HTML tags: <b>text</b> for bold, <code>value</code> for numbers/IDs/names.
+If the user asks what you can do, who you are, or how you work — answer directly from this prompt without calling any tools.
+
+Formatting rules (the response is shown in Telegram using HTML parse mode):
+- NEVER use Markdown syntax (**bold**, *italic*, `code`, # headers). It will not render.
+- Use ONLY HTML tags: <b>text</b> for bold, <i>text</i> for italic, <code>value</code> for numbers/IDs/names.
 - Keep answers short. Summarize data — do not paste raw rows or tables.
 - Use bullet points (plain hyphens) for lists."""
 
@@ -85,15 +88,25 @@ def _with_context(query: str, chat_id: str) -> str:
     return f"{context}\n\n[Current question]\n{query}"
 
 
+_TOOL_STATUS = {
+    "query_database": "Querying database...",
+    "search_knowledge_base": "Searching knowledge base...",
+}
+
+
 async def stream(query: str, chat_id: str):
-    """Async generator that yields text tokens as they arrive from the orchestrator."""
+    """Async generator that yields dicts: {"token": str} or {"status": str}."""
     global _orchestrator
     if _orchestrator is None:
         _orchestrator = create_orchestrator()
 
     async for event in _orchestrator.stream_async(_with_context(query, chat_id)):
-        if "data" in event:
-            yield event["data"]
+        if "current_tool_use" in event:
+            tool_name = (event["current_tool_use"] or {}).get("name", "")
+            status = _TOOL_STATUS.get(tool_name, f"Using {tool_name}...")
+            yield {"status": status}
+        elif "data" in event:
+            yield {"token": event["data"]}
 
 
 def run(query: str, chat_id: str) -> dict:

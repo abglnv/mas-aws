@@ -15,15 +15,16 @@ router = APIRouter()
 
 @router.post("/invoke", response_model=InvokeResponse)
 async def invoke(request: InvokeRequest):
+    log.info(f"[chat_id={request.chat_id}] query: {request.query!r}")
     start = time.time()
 
-    # asyncio so we don't block the fastapi 
+    # asyncio so we don't block the fastapi
     result = await asyncio.get_event_loop().run_in_executor(
         None, orchestrator.run, request.query, request.chat_id
     )
 
     time_taken = time.time() - start
-    log.info(f"Request processed in {time_taken:.2f}s for chat_id={request.chat_id}")
+    log.info(f"[chat_id={request.chat_id}] done in {time_taken:.2f}s | sources={result['sources']}")
 
     asyncio.get_event_loop().run_in_executor(
         None,
@@ -46,9 +47,13 @@ async def invoke(request: InvokeRequest):
 
 @router.post("/invoke/stream")
 async def invoke_stream(request: InvokeRequest):
+    log.info(f"[chat_id={request.chat_id}] stream query: {request.query!r}")
+    start = time.time()
+
     async def generate():
         async for event in orchestrator.stream(request.query, request.chat_id):
             yield f"data: {json.dumps(event)}\n\n"
+        log.info(f"[chat_id={request.chat_id}] stream done in {time.time() - start:.2f}s")
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
